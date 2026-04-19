@@ -1,7 +1,7 @@
 # Early assembly of ground-dwelling beetle communities in newly established suburban yards: the role of residential design
 This repository contains code and data from a study examining ground‑dwelling beetle communities in recently built residential yards in Central Florida, USA. The project evaluates how beetles respond to contrasting landscape designs – native-plant–based yards versus conventionally landscaped yards dominated by turfgrass.
 
-# How to use R Script and Data
+# R Script and Data
 -	Script.txt is included as a plain-text version of the code for quick reference.
 - Required packages are listed in the script header of each section.
 -	All required datasets, including metadata, are provided in Datasets.xlsx.
