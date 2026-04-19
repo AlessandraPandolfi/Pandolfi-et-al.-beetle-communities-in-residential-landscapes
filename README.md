@@ -1,9 +1,9 @@
 # Pandolfi-et-al.-beetle-communities-in-residential-landscapes
-This repository contains code and data from a study examining ground‑dwelling beetle communities in recently built residential yards. The project evaluates how beetles respond to contrasting landscape designs – native‑plant–based yards versus conventionally landscaped yards dominated by turfgrass.
+This repository contains code and data from a study examining ground‑dwelling beetle communities in recently built residential yards in Central Florida, USA. The project evaluates how beetles respond to contrasting landscape designs – native-plant–based yards versus conventionally landscaped yards dominated by turfgrass.
 
 # How to use R Script and Data
 -	Open Script.R in R or RStudio.
-- Required packages are loaded in the script header.
+- Required packages are loaded in the script header of each section.
 -	All required datasets, including metadata, are provided in Datasets.xlsx.
 
 # Supplementary Material
