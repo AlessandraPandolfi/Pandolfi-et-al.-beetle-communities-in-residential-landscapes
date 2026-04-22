@@ -1,0 +1,2552 @@
+# Pandolfi-et-al.-beetle-communities-in-residential-landscapes
+
+################################################################################
+# Non-metric Multidimensional Scaling (NMDS)
+################################################################################
+# Load packages 
+library(vegan)      
+library(tidyverse)  
+library(goeveg)    
+
+# LOT LEVEL AND LANDSCAPE STYLE
+
+species_matrix_site <- Data_nmds %>%
+  group_by(Lot_ID) %>%
+  summarise(across(Acanthinus_argentinus:Xantholininae_sp.C, mean)) %>%
+  ungroup() %>%
+  column_to_rownames("Lot_ID")
+
+set.seed(123)
+species_matrix_site<- decostand(species_matrix_site, method = "hellinger")
+nmds_site <- metaMDS(species_matrix_site, distance = "bray", k = 2, trymax = 200)
+
+print(nmds_site)
+stressplot(nmds_site)
+plot(nmds_site)
+
+metadata_site <- Data_nmds %>%
+  dplyr::select(Lot_ID, Landscape_style) %>%
+  distinct() %>%
+  filter(Lot_ID %in% rownames(species_matrix_site))
+
+nmds_SiteScores <- as.data.frame(scores(nmds_site)$sites) %>%
+  mutate(Lot_ID = rownames(.)) %>%
+  left_join(metadata_site, by = "Lot_ID")
+
+ggplot(nmds_SiteScores, aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(color = Landscape_style), size = 4) +
+  geom_text(aes(label = Lot_ID), vjust = -1, size = 3) +
+  theme_classic() +
+  guides(color = guide_legend(override.aes = list(shape = 16)))
+
+# NMDS plot
+
+hulls <- nmds_SiteScores %>%
+  dplyr::group_by(Landscape_style) %>%
+  dplyr::slice(chull(NMDS1, NMDS2)) %>%
+  dplyr::ungroup()
+
+nmds_lot <- ggplot(nmds_SiteScores, aes(x = NMDS1, y = NMDS2)) +
+  
+  geom_polygon(
+    data = hulls,
+    aes(x = NMDS1, y = NMDS2, 
+        group = Landscape_style,
+        fill = Landscape_style,
+        color = Landscape_style),
+    alpha = 0.25, linewidth = 0.6,
+    inherit.aes = FALSE
+  ) +
+  
+  geom_point(aes(color = Landscape_style), size = 2) +
+  
+  geom_text(
+    data = nmds_SiteScores,
+    aes(x = NMDS1, y = NMDS2, label = Lot_ID),
+    color = "black",
+    vjust = -0.5,
+    size = 3
+  )+
+  
+  scale_colour_viridis_d(option = "D") +
+  scale_fill_viridis_d(option = "D") +
+  
+  labs(
+    x = "NMDS1", y = "NMDS2",
+    colour = "Landscape style",
+    fill = "Landscape style"
+  ) +
+  
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.7),
+    axis.line = element_line(color = "black"),
+    legend.position = "right",
+    legend.key.size = unit(0.4, "cm")
+  )
+
+# LOT-LEVEL PERMANOVA
+dist_site <- vegdist(species_matrix_site, method = "bray")
+
+adonis_site <- adonis2(
+  dist_site ~ Landscape_style,
+  data = metadata_site,
+  permutations = 999
+)
+
+adonis_site
+
+
+dist_mat_site <- vegdist(species_matrix_site, method = "bray")
+
+disp_site <- betadisper(dist_mat_site, metadata_site$Landscape_style)
+
+anova(disp_site)
+
+# Optional: inspect distances to group centroids
+disp_site
+
+# Optional: visualize
+boxplot(disp_site)
+
+TukeyHSD(disp_site)
+
+###
+
+# TRAP LEVEL AND LANDSCAPE STYLE
+
+# Load packages 
+library(vegan)      
+library(tidyverse)  
+library(goeveg)    
+
+species_matrix <- Data_nmds[, 18:ncol(Data_nmds)]
+
+# Species matrix
+
+species_matrix <- as.data.frame(lapply(species_matrix, as.numeric))
+
+species_matrix <- decostand(species_matrix, method = "hellinger")
+
+# Run NMDS 
+
+# Set seed for reproducibility
+set.seed(123)
+
+nmds <- metaMDS(species_matrix, distance = "bray", k = 2)
+
+print(nmds)
+
+stressplot(nmds)
+
+plot(nmds)
+
+# Get habitat type (Use Trap_ID since each row corresponds to one trap sample)
+
+# Create a Unique Sample ID
+Data_nmds <- Data_nmds %>%
+  mutate(Sample_ID = paste(Trap_ID, Month, sep = "_"))
+
+# Extract NMDS scores for sites 
+nmds_SiteScores <-
+  as.data.frame(scores(nmds)$sites) %>%
+  mutate(
+    Sample_ID = Data_nmds$Sample_ID,
+    Landscape_style = Data_nmds$Landscape_style,
+    Month = Data_nmds$Month
+  )
+
+head(nmds_SiteScores)
+
+# Extract NMDS scores for species  
+nmds_SpeciesScores <- 
+  as.data.frame(scores(nmds, "species"))
+
+# create a column of species, from the rownames of species.scores
+nmds_SpeciesScores$species <- rownames(nmds_SpeciesScores) 
+
+### NMDS plot
+
+# Compute convex hulls for each Landscape_style
+habitat.hull <- nmds_SiteScores %>%
+  group_by(Landscape_style) %>%
+  slice(chull(NMDS1, NMDS2)) %>%  # convex hull points
+  ungroup()
+
+# Compute centroids for each Landscape_style
+Landscape_Centroid <- nmds_SiteScores %>%
+  group_by(Landscape_style) %>%
+  summarise(
+    axis1 = mean(NMDS1),
+    axis2 = mean(NMDS2)
+  )
+
+library(ggplot2)
+library(ggrepel)
+library(viridis)
+
+nmds_trap <- ggplot() + 
+  geom_point(data = nmds_SiteScores, 
+             aes(x = NMDS1, y = NMDS2, colour = Landscape_style), size = 2) +
+  geom_polygon(data = habitat.hull, 
+               aes(x = NMDS1, y = NMDS2, 
+                   fill = Landscape_style, 
+                   group = Landscape_style,
+                   color = Landscape_style),
+               alpha = 0.25, linewidth = 0.6) +
+  geom_point(data = Landscape_Centroid, 
+             aes(x = axis1, y = axis2, color = Landscape_style),
+             size = 4, shape = 17, stroke = 1.2) +
+  geom_text_repel(data = nmds_SpeciesScores, 
+                  aes(x = NMDS1, y = NMDS2, label = species),
+                  size = 3, max.overlaps = 100) +
+  
+  labs(x = "NMDS1", y = "NMDS2", color = "Landscape style", fill = "Landscape style") +
+  scale_colour_viridis_d(option = "D") +
+  scale_fill_viridis_d(option = "D") +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),   
+    panel.border = element_rect(color = "black", fill = NA, size = 0.7),
+    axis.line = element_line(color = "black"),
+    legend.position = "right",
+    legend.key.size = unit(0.4, "cm")
+  )
+
+# Test for significant differences
+
+library(vegan)
+
+# Extract species abundance matrix
+# Use species_matrix
+
+# Prepare metadata
+metadata <- Data_nmds[, c("Sample_ID", "Landscape_style", "Month", "Veg_type")]
+
+# Simple PERMANOVA testing Landscape_style
+set.seed(123)  # for reproducibility
+
+adonis_result <- adonis2(
+  species_matrix ~ Landscape_style,
+  data = metadata,
+  permutations = 999,
+  method = "bray"
+)
+
+adonis_result
+
+# PERMDISP
+
+# Bray-Curtis distance on Hellinger-transformed species data
+dist_matrix <- vegdist(species_matrix, method = "bray")
+
+disp_landscape <- betadisper(dist_matrix, metadata$Landscape_style)
+disp_landscape
+
+anova(disp_landscape)
+
+
+# panel for the two nmds
+
+library(patchwork)
+
+(nmds_trap + nmds_lot) +
+  plot_annotation(tag_levels = "A") &
+  theme(
+    plot.tag = element_text(size = 26, face = "plain", color = "black")
+  )
+
+################################################################################
+# Redundancy analysis (RDA)
+################################################################################
+
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(ggnewscale)
+
+# Prepare data for native vs. non-native species
+
+species_status <- data.frame(
+  Species = c(
+    "Acanthinus_argentinus","Acanthinus_scitulus","Ahasverus_rectus",
+    "Aleocharinae_sp.A","Aleocharinae_sp.B","Aleocharinae_sp.C",
+    "Aleocharinae_sp.D","Aleocharinae_sp.E","Aleocharinae_sp.F",
+    "Aleocharinae_sp.G","Aleocharinae_sp.H","Aleocharinae_sp.I",
+    "Anomala_flavipennis","Anthicus_ictericus","Apalonia_seticornis",
+    "Apocellus_sphaericollis","Asiopus_minimus","Astenus_sp.A",
+    "Astenus_sp.B","Blapstinus_fortis","Bryoporus_testaceus",
+    "Caenocara_sp.A","Chauliognathus_marginatus","Ciinae_sp.A",
+    "Corylophidae_sp.A","Cyclocephala_lurida","Diochus_schaumi",
+    "Diomus_roseicollis","Erichsonius_floridanus","Euconnus_sp.A",
+    "Eudiagogus_rosenschoeldi","Euphoria_sepulcralis",
+    "Gondwanocrypticus_platensis","Heteroderes_amplicollis",
+    "Hydrocanthus_oblongus","Hypomedon_debilicornis","Ischnosoma_flavicolle","Leiodidae_sp.A",
+    "Leiopsammodius_malkini","Lithocharodes_ruficollis","Lobopoda_sp.A",
+    "Longitarsus_sp.A","Melanophthalma_picta","Mimogonus_fumator",
+    "Molosoma_brevicorne","Myrmecosaurus_ferrugineus",
+    "Pachybrachis_hepaticus","Pasimachus_sublaevis",
+    "Philonthus_sp.A","Platydracus_caliginosus","Platytomus_micros",
+    "Poecilocrypticus_formicophilus","Ptiliidae_sp.A",
+    "Ptilodactyla_sp.A","Rismethus_squamiger","Scaphisoma_sp.A",
+    "Scolytinae_sp.A","Scolytinae_sp.B","Scopaeus_sp.A","Scymnus_sp.A",
+    "Smicrips_palmicola","Sphenophorus_venatus","Stelidota_coenosa",
+    "Stilbusgroup_sp.A","Tachyura_granaria",
+    "Tetragonoderus_laevigatus","Tomoderus_interruptus",
+    "Trigonopeltastes_delta","Trogoderma_ornatum","Typhaea_stercorea",
+    "Vacusus_parvus","Xantholininae_sp.A","Xantholininae_sp.B",
+    "Xantholininae_sp.C"
+  ),
+  Origin = c(
+    "Non-native","Native","Native","Native","Native","Native","Native",
+    "Native","Native","Native","Native","Native","Native","Native","Native",
+    "Native","Native","Native","Native","Native","Native","Native","Native",
+    "Native","Native","Native","Non-native","Native","Native","Native",
+    "Native","Non-native","Non-native","Native","Native","Native","Native","Native",
+    "Native","Native","Native","Native","Non-native","Native","Non-native",
+    "Native","Native","Native","Native","Native","Non-native","Native",
+    "Native","Native","Native","Native","Native","Native","Native","Native",
+    "Native","Native","Native","Native","Native","Non-native",
+    "Native","Native","Native","Non-native","Non-native","Native","Native",
+    "Native"
+  )
+)
+
+# Prepare species and environmental data 
+species <- Beetles_all %>% select(Acanthinus_argentinus:Xantholininae_sp.C)
+env <- Beetles_all %>% select(Trap_ID, Landscape_style, Month)
+
+# Remove rows with all zeros
+
+# Hellinger transformation on non zero data
+species_hel <- decostand(species, method = "hellinger")
+
+# PERMANOVA
+
+perm_results <- adonis2(
+  species_hel ~ Landscape_style * Month,
+  data = env,
+  method = "euclidean",         
+  permutations = 999,
+  by = "terms",           
+  strata = env$Trap_ID  
+)
+
+print(perm_results)
+
+# PERMDISP (test homogeneity of dispersions)
+
+# Compute distance matrix
+dist_bc <- vegdist(species_hel, method = "euclidean")
+
+# Landscape_style
+disp_ls <- betadisper(dist_bc, env$Landscape_style)
+anova(disp_ls)     
+permutest(disp_ls)  
+
+# Month 
+disp_month <- betadisper(dist_bc, env$Month)
+anova(disp_month)
+permutest(disp_month)
+
+# Interaction 
+interaction_factor <- interaction(env$Landscape_style, env$Month)
+disp_inter <- betadisper(dist_bc, interaction_factor)
+anova(disp_inter)
+permutest(disp_inter)
+
+# Per-month PERMANOVA
+
+dist_hel <- dist(species_hel, method = "euclidean")
+
+months <- unique(env$Month)
+
+pairwise_permanova <- lapply(months, function(m) {
+  idx <- env$Month == m
+  # subset species data for this month
+  species_sub <- species_hel[idx, ]
+  # compute distance for this subset
+  dist_sub <- dist(species_sub, method = "euclidean")
+  # run PERMANOVA
+  adonis2(
+    dist_sub ~ Landscape_style,
+    data = env[idx, ],
+    permutations = 999
+  )
+})
+
+names(pairwise_permanova) <- months
+pairwise_permanova
+
+
+# Run RDA with transformed species and env data 
+rda_model <- rda(species_hel ~ Landscape_style * Month + Condition(Trap_ID), data = env)
+
+summary(rda_model)
+
+# Predictor scores
+scores(rda_model, display = "bp")
+
+# Check residuals
+rda_res <- residuals(rda_model)
+
+qqnorm(rda_res)
+qqline(rda_res)
+
+hist(rda_res, breaks = 30)
+
+ordiplot(rda_model, scaling = 2, type = "text")
+
+# Extract species scores for arrows
+species_scores <- scores(rda_model, display = "species", scaling = 2)
+species_df <- data.frame(
+  Species = rownames(species_scores),
+  RDA1 = species_scores[,1],
+  RDA2 = species_scores[,2]
+)
+
+# Merge with species origin status
+species_df2 <- merge(species_df, species_status, by = "Species")
+
+# Extract site (sample) scores
+site_scores <- scores(rda_model, display = "sites", scaling = 2)
+site_df <- as.data.frame(site_scores)
+
+# Add grouping variables from env (not from original dataframe)
+site_df$Landscape_style <- env$Landscape_style
+site_df$Month <- env$Month
+
+# Calculate convex hulls per Month (or per Landscape style, or both)
+month_hulls <- site_df %>%
+  group_by(Month) %>%
+  dplyr::slice(chull(RDA1, RDA2)) %>%
+  ungroup()
+
+# Define colors and shapes
+my_colors_month <- c("March" = "#009E73", "June" = "#E69F00", "September" = "#0072B2")
+shape_ls <- c("Native" = 1, "Conventional" = 16)
+
+# Plot using ggplot, with polygons by Month, points shaped by Landscape_style, colored by Month,
+# and arrows colored by species origin
+
+################################################################################
+# Figure 3: RDA across landscape styles and months
+################################################################################
+
+site_df$Month <- factor(
+  site_df$Month,
+  levels = c("March", "June", "September")
+)
+
+ggplot(site_df, aes(x = RDA1, y = RDA2)) +
+  
+  geom_polygon(
+    data = month_hulls,
+    aes(x = RDA1, y = RDA2, group = Month, fill = Month, color = Month),
+    alpha = 0.1,
+    linewidth = 0.3,   
+    show.legend = FALSE
+  ) +
+  
+  geom_point(aes(color = Month, shape = Landscape_style), size = 3) +
+  
+  scale_shape_manual(name = "Landscape Style", values = shape_ls) +
+  
+  scale_color_manual(name = "Month", values = my_colors_month) +
+  
+  new_scale_color() +
+  
+  geom_segment(
+    data = species_df2,
+    aes(x = 0, y = 0, xend = RDA1, yend = RDA2, color = Origin),
+    arrow = arrow(length = unit(0.2, "cm")),
+    linewidth = 0.6,
+    inherit.aes = FALSE
+  ) +
+  
+  scale_color_manual(
+    name = "Species Status",
+    values = c("Native" = "#0000CD", "Non-native" = "red2"),
+    breaks = c("Native", "Non-native")
+  ) +
+  
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+  
+  coord_equal() +
+  
+  theme_bw() +
+  
+  theme(
+    panel.grid = element_blank(),
+    plot.background  = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "white", color = NA),
+    legend.key = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(color = "black"),
+    axis.text.y = element_text(color = "black")  
+  ) +   
+  labs(
+    x = "RDA1 (61.2%)",
+    y = "RDA2 (20.7%)"
+  )
+
+
+# Testing RDA
+
+# PERMANOVA
+adonis2(species_hel ~ Landscape_style * Month, data = env, permutations = 999, method = "euclidean", strata = env$Trap_ID)
+
+summary(rda_model)
+
+# PERMDISP by Landscape style (homogeneity of dispersion)
+
+disp_ls <- betadisper(dist_hel, env$Landscape_style)
+
+anova(disp_ls)
+permutest(disp_ls, permutations = 999)
+TukeyHSD(disp_ls)
+
+# PERMDISP by Month (homogeneity of dispersion)
+
+disp_month <- betadisper(dist_hel, env$Month)
+
+anova(disp_month)
+permutest(disp_month, permutations = 999)
+TukeyHSD(disp_month)
+
+################################################################################
+# Generalized Linear Mixed Model (GLMM)
+################################################################################
+
+# Beetle Counts (Activity density)
+
+library(glmmTMB)
+
+# Factors
+Beetles_all$Month <- as.factor(Beetles_all$Month ) 
+Beetles_all$Landscape_style <- as.factor(Beetles_all$Landscape_style)
+Beetles_all$Lot_ID <- as.factor(Beetles_all$Lot_ID)
+Beetles_all$Replicate_ID <- as.factor(Beetles_all$Replicate_ID)
+Beetles_all$Trap_ID <- as.factor(Beetles_all$Trap_ID)
+Beetles_all$Veg_type <- as.factor(Beetles_all$Veg_type)
+
+# Relevel the factor to make "March" the reference
+Beetles_all$Month <- relevel(Beetles_all$Month, ref = "March")
+
+# Relevel the factor to make "Native" the reference
+Beetles_all$Landscape_style <- relevel(Beetles_all$Landscape_style, ref = "Native")
+
+# Relevel the factor to make "Native" the reference
+Beetles_all$Veg_type <- relevel(Beetles_all$Veg_type, ref = "Native")
+
+# Models
+null_count <- glmmTMB(Count ~ 1 + (1 |Trap_ID), data = Beetles_all, family = nbinom2) 
+
+model_count1 <- glmmTMB(Count ~ Landscape_style + (1 |Trap_ID), 
+                        data = Beetles_all,
+                        family = nbinom2) 
+
+model_count2 <- glmmTMB(Count ~ Month + (1 |Trap_ID), 
+                        data = Beetles_all, 
+                        family = nbinom2) 
+
+model_count3 <- glmmTMB(Count ~ Landscape_style + Month + (1 |Trap_ID),
+                        data = Beetles_all,
+                        family = nbinom2) 
+
+model_count4 <-glmmTMB(Count ~ Landscape_style * Month + (1 | Trap_ID), 
+                       data = Beetles_all,
+                       family = nbinom2) 
+
+model_count5 <- glmmTMB(Count ~ Veg_type + (1 |Trap_ID),
+                        data = Beetles_all,
+                        family = nbinom2) 
+
+model_count6 <- glmmTMB(Count ~ Veg_type + Month + (1 |Trap_ID),
+                        data = Beetles_all,
+                        family = nbinom2) 
+
+model_count7 <-glmmTMB(Count ~ Veg_type * Month + (1 | Trap_ID), 
+                       data = Beetles_all,
+                       family = nbinom2) 
+
+
+library(bbmle) 
+
+# Use this for Landscape style
+AICtab(null_count, model_count1, model_count2, model_count3, model_count4, weights=T, base = T) 
+
+# Use this for Vegetation type
+AICtab(null_count,model_count2, model_count5, model_count6, model_count7, weights=T, base = T) 
+
+# Summary of the best model
+summary(model_count7) 
+
+library(MuMIn)
+
+r.squaredGLMM(model_count7)
+
+library(DHARMa)
+
+#  Simulate residuals for your model
+sim_res <- simulateResiduals(fittedModel = model_count7)  
+# add n = number of simulations, increase if you want more precision (n=1000)
+
+# Basic residual plots
+plot(sim_res)   # Includes residuals vs predicted, QQ plot, etc.
+
+# Dispersion test
+disp_test <- testDispersion(sim_res)
+disp_test       # prints result (p > 0.05 = no overdispersion)
+
+# Uniformity / goodness-of-fit test (KS test)
+uni_test <- testUniformity(sim_res)
+uni_test        # prints result (p > 0.05 = residuals uniform, good fit)
+
+# Outlier test
+outlier_test <- testOutliers(sim_res)
+outlier_test    # prints result (p > 0.05 = no extreme outliers)
+
+#  Zero-inflation test
+zi_test <- testZeroInflation(sim_res)
+zi_test         # p > 0.05 = no zero-inflation problem
+
+
+# Beetle Taxa (Species Richness)
+
+null_SR <- glmmTMB(SR ~ 1 + (1 |Trap_ID), data = Beetles_all, family = nbinom2) 
+
+model_SR1 <- glmmTMB(SR ~ Landscape_style + (1 |Trap_ID), 
+                     data = Beetles_all,
+                     family = nbinom2) 
+
+model_SR2 <- glmmTMB(SR ~ Month + (1 |Trap_ID), 
+                     data = Beetles_all, 
+                     family = nbinom2) 
+
+model_SR3 <- glmmTMB(SR ~ Landscape_style + Month + (1 |Trap_ID),
+                     data = Beetles_all,
+                     family = nbinom2) 
+
+model_SR4 <-glmmTMB(SR ~ Landscape_style * Month + (1 | Trap_ID), 
+                    data = Beetles_all,
+                    family = nbinom2) 
+
+model_SR5 <- glmmTMB(SR ~ Veg_type + (1 |Trap_ID),
+                     data = Beetles_all,
+                     family = nbinom2) 
+
+model_SR6 <- glmmTMB(SR ~ Veg_type + Month + (1 |Trap_ID),
+                     data = Beetles_all,
+                     family = nbinom2) 
+
+model_SR7 <-glmmTMB(SR ~ Veg_type * Month + (1 | Trap_ID), 
+                    data = Beetles_all,
+                    family = nbinom2) 
+
+library(bbmle) 
+
+# Use this for Landscape style
+AICtab(null_SR, model_SR1, model_SR2, model_SR3, model_SR4, weights=T, base = T) 
+
+# Use this for Vegetation type
+AICtab(null_SR, model_SR2, model_SR5, model_SR6, model_SR7, weights=T, base = T) 
+
+# Summary of the best model
+summary(model_SR7) 
+
+library(MuMIn)
+
+r.squaredGLMM(model_SR7)
+
+library(DHARMa)
+
+#  Simulate residuals for your model
+sim_res <- simulateResiduals(fittedModel = model_SR7)  
+# add n = number of simulations, increase if you want more precision (n=1000)
+
+# Basic residual plots
+plot(sim_res)   # Includes residuals vs predicted, QQ plot, etc.
+
+# Dispersion test
+disp_test <- testDispersion(sim_res)
+disp_test       # prints result (p > 0.05 = no overdispersion)
+
+# Uniformity / goodness-of-fit test (KS test)
+uni_test <- testUniformity(sim_res)
+uni_test        # prints result (p > 0.05 = residuals uniform, good fit)
+
+# Outlier test
+outlier_test <- testOutliers(sim_res)
+outlier_test    # prints result (p > 0.05 = no extreme outliers)
+
+#  Zero-inflation test
+zi_test <- testZeroInflation(sim_res)
+zi_test         # p > 0.05 = no zero-inflation problem
+
+
+################################################################################
+# Native and non-native beetles 
+################################################################################
+
+# Load necessary packages 
+
+library(glmmTMB) 
+library(emmeans) 
+library(ggplot2) 
+library(dplyr) 
+library(performance) 
+
+# Presence/Absence Native 
+
+# Factors
+Beetles_all$Month <- as.factor(Beetles_all$Month ) 
+Beetles_all$Landscape_style <- as.factor(Beetles_all$Landscape_style)
+Beetles_all$Lot_ID <- as.factor(Beetles_all$Lot_ID)
+Beetles_all$Replicate_ID <- as.factor(Beetles_all$Replicate_ID)
+Beetles_all$Trap_ID <- as.factor(Beetles_all$Trap_ID)
+Beetles_all$Veg_type <- as.factor(Beetles_all$Veg_type)
+
+# Relevel the factor to make "March" the reference
+Beetles_all$Month <- relevel(Beetles_all$Month, ref = "March")
+
+# Relevel the factor to make "Native" the reference
+Beetles_all$Landscape_style <- relevel(Beetles_all$Landscape_style, ref = "Native")
+
+# Relevel the factor to make "Native" the reference
+Beetles_all$Veg_type <- relevel(Beetles_all$Veg_type, ref = "Native")
+
+# Presence/Absence Native beetles
+
+null_ns<- glmmTMB(Native ~ 1 + (1 |Trap_ID), data = Beetles_all, family = binomial) 
+
+model_ns1 <- glmmTMB(Native ~ Veg_type + (1 |Trap_ID), 
+                     family = binomial, data = Beetles_all) 
+
+model_ns2 <- glmmTMB(Native ~ Month + (1 |Trap_ID), 
+                     family = binomial, data = Beetles_all) 
+
+model_ns3 <- glmmTMB(Native ~ Veg_type + Month + (1 |Trap_ID), 
+                     family = binomial, data = Beetles_all) 
+
+model_ns4 <- glmmTMB(Native ~ Veg_type * Month + (1 |Trap_ID),
+                     family = binomial, data = Beetles_all) 
+
+
+library(bbmle)
+
+AICtab(null_ns, model_ns1, model_ns2, model_ns3, model_ns4, weights=T, base = T) 
+
+summary(model_ns1) 
+
+library(performance)
+
+r2(model_ns1)
+
+library(DHARMa)
+par(mfrow = c(1,1))
+
+#  Simulate residuals for your model
+sim_res <- simulateResiduals(fittedModel = model_ns1)  
+# add n = number of simulations, increase if you want more precision (n=1000)
+
+# Basic residual plots
+plot(sim_res)   # Includes residuals vs predicted, QQ plot, etc.
+
+# Dispersion test
+disp_test <- testDispersion(sim_res)
+disp_test       # prints result (p > 0.05 = no overdispersion)
+
+# Uniformity / goodness-of-fit test (KS test)
+uni_test <- testUniformity(sim_res)
+uni_test        # prints result (p > 0.05 = residuals uniform, good fit)
+
+# Outlier test
+outlier_test <- testOutliers(sim_res)
+outlier_test    # prints result (p > 0.05 = no extreme outliers)
+
+#  Zero-inflation test
+zi_test <- testZeroInflation(sim_res)
+zi_test         # p > 0.05 = no zero-inflation problem
+
+
+# Presence/Absence Non-native
+
+library(glmmTMB)
+
+null_nns <- glmmTMB(Non_native ~ 1 + (1 |Trap_ID), data = Beetles_all, family = binomial) 
+
+model_nns1 <- glmmTMB(Non_native ~ Veg_type + (1 |Trap_ID), 
+                      family = binomial, data = Beetles_all) 
+
+model_nns2 <- glmmTMB(Non_native ~ Month + (1 |Trap_ID), 
+                      family = binomial, data = Beetles_all) 
+
+model_nns3 <- glmmTMB(Non_native ~ Veg_type + Month + (1 | Trap_ID), 
+                      family = binomial, data = Beetles_all) 
+
+model_nns4 <- glmmTMB(Non_native ~ Veg_type * Month + (1 | Trap_ID), 
+                      family = binomial, data = Beetles_all) 
+
+library(bbmle) 
+
+AICtab(null_nns, model_nns1, model_nns2, model_nns3, model_nns4, weights=T, base = T) 
+
+summary(model_nns4) 
+
+library(performance)
+
+r2(model_nns4)
+
+
+library(DHARMa)
+
+#  Simulate residuals for your model
+sim_res <- simulateResiduals(fittedModel = model_nns4)  
+# add n = number of simulations, increase if you want more precision (n=1000)
+
+# Basic residual plots
+plot(sim_res)   # Includes residuals vs predicted, QQ plot, etc.
+
+# Dispersion test
+disp_test <- testDispersion(sim_res)
+disp_test       # prints result (p > 0.05 = no overdispersion)
+
+# Uniformity / goodness-of-fit test (KS test)
+uni_test <- testUniformity(sim_res)
+uni_test        # prints result (p > 0.05 = residuals uniform, good fit)
+
+# Outlier test
+outlier_test <- testOutliers(sim_res)
+outlier_test    # prints result (p > 0.05 = no extreme outliers)
+
+#  Zero-inflation test
+zi_test <- testZeroInflation(sim_res)
+zi_test         # p > 0.05 = no zero-inflation problem
+
+
+################################################################################
+# Indicator Species Analysis 
+################################################################################
+
+library(indicspecies) 
+
+# Species abundance matrix (samples x species) 
+
+sp_mat <- Beetles_all[, 18:ncol(Beetles_all)] 
+
+# Grouping variable (make sure it's a factor) 
+
+grouping <- as.factor(Beetles_all$Veg_type) 
+
+# Run the analysis 
+
+indval_result <- multipatt(sp_mat, grouping, func = "IndVal.g", control = how(nperm=999)) 
+
+# Summary of results 
+
+summary(indval_result, indvalcomp=TRUE) 
+
+
+################################################################################ 
+# Vegetation growth types 
+################################################################################
+
+# Dataset Veg_growth
+
+# glmm models on Vegetation growth type 
+
+library(glmmTMB) 
+
+Veg_growth$GroundCover <- as.factor(Veg_growth$GroundCover)
+Veg_growth$Herb <-as.factor(Veg_growth$Herb)
+Veg_growth$Graminoid <- as.factor(Veg_growth$Graminoid)
+Veg_growth$Shrub <- as.factor(Veg_growth$Shrub)
+Veg_growth$SubCanopy <- as.factor(Veg_growth$SubCanopy)
+Veg_growth$Canopy <- as.factor(Veg_growth$Canopy)
+Veg_growth$Lawn <- as.factor(Veg_growth$Lawn)
+Veg_growth$Trap_ID <- as.factor(Veg_growth$Trap_ID)
+Veg_growth$Month <- as.factor(Veg_growth$Month)
+
+# Relevel the factor to make "March" the reference
+Veg_growth$Month <- relevel(Veg_growth$Month, ref = "March")
+
+
+# Beetle Counts (Activity density)
+
+null_growth_C <- glmmTMB(Count ~ 1 +  (1 | Trap_ID), data = Veg_growth, family = nbinom2) 
+
+growth_C1 <- glmmTMB( 
+  Count ~ Lawn + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_C1a <- glmmTMB( 
+  Count ~ Lawn + Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_C1b <- glmmTMB( 
+  Count ~ Lawn * Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_C2 <- glmmTMB( 
+  Count ~ GroundCover + 
+    (1 | Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_C2a <- glmmTMB( 
+  Count ~ GroundCover + Month + 
+    (1 | Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_C2b <- glmmTMB( 
+  Count ~ GroundCover * Month + 
+    (1 | Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_C3 <- glmmTMB( 
+  Count ~ GroundCover + Herb + Graminoid + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # ground-level vegetation 
+
+growth_C3a <- glmmTMB( 
+  Count ~ (GroundCover + Herb + Graminoid) + Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+growth_C3b <- glmmTMB( 
+  Count ~ (GroundCover + Herb + Graminoid) * Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+growth_C4 <- glmmTMB( 
+  Count ~ Shrub + SubCanopy + Canopy +   
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_C4a <- glmmTMB( 
+  Count ~ (Shrub + SubCanopy + Canopy) + Month +   
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_C4b <- glmmTMB( 
+  Count ~ (Shrub + SubCanopy + Canopy) * Month +   
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # vertical structure 
+
+library(bbmle)  
+
+AICtab(null_growth_C, growth_C1, growth_C2, growth_C3, growth_C4, growth_C1a, growth_C2a, growth_C3a, growth_C4a, growth_C1b, growth_C2b, growth_C3b, growth_C4b, weights=T, base = T) 
+
+summary(growth_C1b) 
+
+library(performance)
+
+r2(growth_C1b)
+
+library(DHARMa)
+
+#  Simulate residuals for your model
+sim_res <- simulateResiduals(fittedModel = growth_C1b)  
+# add n = number of simulations, increase if you want more precision (n=1000)
+
+# Basic residual plots
+plot(sim_res)   # Includes residuals vs predicted, QQ plot, etc.
+
+# Dispersion test
+disp_test <- testDispersion(sim_res)
+disp_test       # prints result (p > 0.05 = no overdispersion)
+
+# Uniformity / goodness-of-fit test (KS test)
+uni_test <- testUniformity(sim_res)
+uni_test        # prints result (p > 0.05 = residuals uniform, good fit)
+
+# Outlier test
+outlier_test <- testOutliers(sim_res)
+outlier_test    # prints result (p > 0.05 = no extreme outliers)
+
+#  Zero-inflation test
+zi_test <- testZeroInflation(sim_res)
+zi_test         # p > 0.05 = no zero-inflation problem
+
+
+# Beetle Taxa (Species Richness)
+
+null_growth_SR <- glmmTMB(SR ~ 1 +  (1 | Trap_ID), data = Veg_growth, family = nbinom2) 
+
+growth_SR1 <- glmmTMB( 
+  SR ~ Lawn + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_SR1a <- glmmTMB( 
+  SR ~ Lawn + Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_SR1b <- glmmTMB( 
+  SR ~ Lawn * Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_SR2 <- glmmTMB( 
+  SR ~ GroundCover + 
+    (1 | Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_SR2a <- glmmTMB( 
+  SR ~ GroundCover + Month + 
+    (1 | Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_SR2b <- glmmTMB( 
+  SR ~ GroundCover * Month + 
+    (1 | Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_SR3 <- glmmTMB( 
+  SR ~ GroundCover + Herb + Graminoid + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # ground-level vegetation 
+
+growth_SR3a <- glmmTMB( 
+  SR ~ (GroundCover + Herb + Graminoid) + Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+growth_SR3b <- glmmTMB( 
+  SR ~ (GroundCover + Herb + Graminoid) * Month + 
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+growth_SR4 <- glmmTMB( 
+  SR ~ Shrub + SubCanopy + Canopy +   
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_SR4a <- glmmTMB( 
+  SR ~ (Shrub + SubCanopy + Canopy) + Month +   
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_SR4b <- glmmTMB( 
+  SR ~ (Shrub + SubCanopy + Canopy) * Month +   
+    (1 |Trap_ID), 
+  family = nbinom2, 
+  data = Veg_growth 
+) # vertical structure 
+
+library(bbmle)  
+
+AICtab(null_growth_SR, growth_SR1, growth_SR2, growth_SR3, growth_SR4, growth_SR1a, growth_SR2a, growth_SR3a, growth_SR4a, growth_SR1b, growth_SR2b, weights=T, base = T) 
+
+summary(growth_SR1b) 
+
+library(performance)
+
+r2(growth_SR1b)
+
+library(DHARMa)
+
+#  Simulate residuals for your model
+sim_res <- simulateResiduals(fittedModel = growth_SR1b)  
+# add n = number of simulations, increase if you want more precision (n=1000)
+
+# Basic residual plots
+plot(sim_res)   # Includes residuals vs predicted, QQ plot, etc.
+
+# Dispersion test
+disp_test <- testDispersion(sim_res)
+disp_test       # prints result (p > 0.05 = no overdispersion)
+
+# Uniformity / goodness-of-fit test (KS test)
+uni_test <- testUniformity(sim_res)
+uni_test        # prints result (p > 0.05 = residuals uniform, good fit)
+
+# Outlier test
+outlier_test <- testOutliers(sim_res)
+outlier_test    # prints result (p > 0.05 = no extreme outliers)
+
+#  Zero-inflation test
+zi_test <- testZeroInflation(sim_res)
+zi_test         # p > 0.05 = no zero-inflation problem
+
+
+# Native presence/absence
+
+null_growth_ns <- glmmTMB(Native ~ 1 + (1 | Trap_ID), data = Veg_growth, family = binomial) 
+
+growth_ns1 <- glmmTMB( 
+  Native ~ Lawn  + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_ns1a <- glmmTMB( 
+  Native ~ Lawn  + Month +
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_ns1b <- glmmTMB( 
+  Native ~ Lawn  * Month + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_ns2 <- glmmTMB( 
+  Native ~ GroundCover + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # low-growing plants that cover the ground 
+
+growth_ns2a <- glmmTMB( 
+  Native ~ GroundCover + Month + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # low-growing plants that cover the ground 
+
+growth_ns2b <- glmmTMB( 
+  Native ~ GroundCover * Month + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # low-growing plants that cover the ground 
+
+growth_ns3 <- glmmTMB( 
+  Native ~ GroundCover + Herb + Graminoid +
+    (1 | Trap_ID),
+  family = binomial, 
+  data = Veg_growth 
+) # ground-level vegetation 
+
+growth_ns3a <- glmmTMB( 
+  Native ~ (GroundCover + Herb + Graminoid) + Month  + 
+    (1 | Trap_ID),
+  family = binomial, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+growth_ns3b <- glmmTMB( 
+  Native ~ (GroundCover + Herb + Graminoid) * Month + 
+    (1 | Trap_ID),
+  family = binomial, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+growth_ns4 <- glmmTMB( 
+  Native ~ Shrub + SubCanopy + Canopy +   
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_ns4a <- glmmTMB( 
+  Native ~ Shrub + SubCanopy + Canopy + Month +   
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_ns4b <- glmmTMB( 
+  Native ~ (Shrub + SubCanopy + Canopy) * Month +   
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # vertical structure 
+
+library(bbmle) 
+
+AICtab(null_growth_ns, growth_ns1, growth_ns2, growth_ns3, growth_ns4, growth_ns1a, growth_ns2a, growth_ns3a, growth_ns4a, growth_ns1b, growth_ns2b, growth_ns3b, growth_ns4b, weights=T, base = T) 
+
+
+# Non-native beetles and growth types
+
+null_growth_nns <- glmmTMB(Non_native ~ 1 +  (1 | Trap_ID), data = Veg_growth, family = binomial) 
+
+growth_nns1 <- glmmTMB( 
+  Non_native ~ Lawn + 
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_nns1a <- glmmTMB( 
+  Non_native ~ Lawn + Month + 
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_nns1b <- glmmTMB( 
+  Non_native ~ Lawn * Month + 
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # monoculture - turf grass 
+
+growth_nns2 <- glmmTMB( 
+  Non_native ~ GroundCover + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_nns2a <- glmmTMB( 
+  Non_native ~ GroundCover + Month + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_nns2b <- glmmTMB( 
+  Non_native ~ GroundCover * Month + 
+    (1 | Trap_ID), 
+  family = binomial, 
+  data = Veg_growth
+) # low-growing plants that cover the ground 
+
+growth_nns3 <- glmmTMB( 
+  Non_native ~ GroundCover + Herb + Graminoid + 
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # ground-level vegetation 
+
+growth_nns3a <- glmmTMB( 
+  Non_native ~ (GroundCover + Herb + Graminoid) + Month + 
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+growth_nns3b <- glmmTMB( 
+  Non_native ~ (GroundCover + Herb + Graminoid) * Month + 
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # all ground-level vegetation 
+
+
+growth_nns4 <- glmmTMB( 
+  Non_native ~ Shrub + SubCanopy + Canopy +   
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_nns4a <- glmmTMB( 
+  Non_native ~ (Shrub + SubCanopy + Canopy) + Month +   
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # vertical structure 
+
+growth_nns4b <- glmmTMB( 
+  Non_native ~ (Shrub + SubCanopy + Canopy) * Month +   
+    (1 |Trap_ID), 
+  family = binomial, 
+  data = Veg_growth 
+) # vertical structure 
+
+library(bbmle) 
+
+AICtab(null_growth_nns, growth_nns1, growth_nns2, growth_nns3, growth_nns4, growth_nns1a, growth_nns2a, growth_nns3a, growth_nns4a, growth_nns1b, growth_nns2b, growth_nns3b, growth_nns4b, weights=T, base = T) 
+
+summary(growth_nns1b) 
+
+library(performance)
+
+r2(growth_nns1b)
+
+
+library(DHARMa)
+
+#  Simulate residuals for your model
+sim_res <- simulateResiduals(fittedModel = growth_nns1b)  
+# add n = number of simulations, increase if you want more precision (n=1000)
+
+# Basic residual plots
+plot(sim_res)   # Includes residuals vs predicted, QQ plot, etc.
+
+# Dispersion test
+disp_test <- testDispersion(sim_res)
+disp_test       # prints result (p > 0.05 = no overdispersion)
+
+# Uniformity / goodness-of-fit test (KS test)
+uni_test <- testUniformity(sim_res)
+uni_test        # prints result (p > 0.05 = residuals uniform, good fit)
+
+# Outlier test
+outlier_test <- testOutliers(sim_res)
+outlier_test    # prints result (p > 0.05 = no extreme outliers)
+
+#  Zero-inflation test
+zi_test <- testZeroInflation(sim_res)
+zi_test         # p > 0.05 = no zero-inflation problem
+
+
+################################################################################
+# Functional diversity 
+################################################################################
+
+# mFD package to compute and plot Functional Diversity 
+
+library(mFD) 
+library(FD)
+
+# https://cran.r-project.org/web/packages/mFD/vignettes/mFD_general_workflow.html 
+
+rownames(Beetles_traits) <- Beetles_traits[, 1] 
+
+Beetles_traits <- Beetles_traits[, -1]  # Remove the first column after setting row names 
+
+# 1. Display the table:
+knitr::kable(head(Beetles_traits),
+             caption = "Species x traits data frame")
+
+# use size as category 
+
+Beetles_traits$Diet <- as.factor(Beetles_traits$Diet ) 
+Beetles_traits$Wings <- as.factor(Beetles_traits$Wings ) 
+Beetles_traits$Substrate <- as.factor(Beetles_traits$Substrate ) 
+Beetles_traits$Size <- as.factor(Beetles_traits$Size) # if used as numeric keep it out from as.factor 
+
+# Use FD_1 for landscape only, FD_2 for landscape and months
+
+rownames(FD_2) <- FD_2[, 1] 
+sp_new <- FD_2[, -1] 
+
+y <- as.matrix(sp_new) 
+TR <- Beetles_traits 
+
+# Display the table:
+knitr::kable(as.data.frame(FD_2[1:6, 1:6]), 
+             centering = TRUE,
+             caption = "Species x assemblages matrix based on the **season** dataset")
+
+# Characterize types of traits 
+
+traits_metadata <- data.frame( 
+  trait_name = c("Diet", "Wings", "Size", "Substrate"), 
+  trait_type = c("N", "N", "O", "N") 
+) # if Size used as numeric change with Q = quantitative traits (numeric values) 
+
+Beetles_traits$Size <- factor(Beetles_traits$Size,
+                              levels = c("S", "M", "L"),
+                              ordered = TRUE)
+
+# Display the table:
+knitr::kable(head(traits_metadata), 
+             caption = "Traits types based on **species and season** dataset")
+
+# Species traits summary: 
+
+traits_summ <- mFD::sp.tr.summary( 
+  tr_cat     = traits_metadata,    
+  sp_tr      = Beetles_traits, 
+  stop_if_NA = TRUE) 
+
+
+traits_summ$"tr_types"# Traits types 
+
+traits_summ$"mod_list" # Traits types for non-continuous and non-fuzzy traits 
+
+
+# Summary of the assemblages * species dataframe: 
+
+asb_sp_summ <- mFD::asb.sp.summary(asb_sp_w = y) 
+
+head(asb_sp_summ$"asb_sp_occ", 3)        # Species occurrences for the first 3 assemblages 
+
+asb_sp_occ <- asb_sp_summ$"asb_sp_occ" 
+
+asb_sp_summ$"sp_tot_w"              # Species total biomass in all assemblages 
+
+asb_sp_summ$"asb_tot_w"             # Total biomass per assemblage 
+
+asb_sp_summ$"asb_sp_richn"           # Species richness per assemblage 
+
+asb_sp_summ$"asb_sp_nm"[[1]]             # Names of species present in the first assemblage 
+
+
+###
+
+# 2.Gathering species into functional entities
+
+# https://cmlmagneville.github.io/mFD/articles/How_to_deal_with_Functional_Entities.html 
+
+sp_to_fe <- mFD::sp.to.fe(
+  sp_tr       = Beetles_traits, 
+  tr_cat      = traits_metadata, 
+  fe_nm_type  = "fe_rank", 
+  check_input = TRUE) 
+
+sp_to_fe$"fe_nm" # vector containing FEs names
+
+sp_fe <- sp_to_fe$"sp_fe" # vector containing for each species, the FE it belongs to
+sp_fe 
+
+fe_tr <- sp_to_fe$"fe_tr" # df containing for FEs, the values of traits for each FE 
+fe_tr
+
+fe_nb_sp <- sp_to_fe$"fe_nb_sp" # vector containing the number of species for FE
+fe_nb_sp
+
+sp_to_fe$"details_fe" # detailed list with supplementary info about FEs
+
+# Use fe_tr (value of traits for each FE) to run the workflow listed in  mFD General Workflow to compute functional trait based distance - step 3 till the end
+
+# mFD also allows to compute functional indices based on FEs following the framework proposed in Mouillot et al. 2014) using the mFD::alpha.fd.fe() function.
+
+# It computes: Functional Redundancy, Functional Overredundancy, Functional Vulnerability
+
+alpha_fd_fe <- mFD::alpha.fd.fe(
+  asb_sp_occ       = asb_sp_occ, 
+  sp_to_fe         = sp_to_fe,
+  ind_nm           = c("fred", "fored", "fvuln"),
+  check_input      = TRUE,
+  details_returned = TRUE) 
+
+# Dataframe for FE values
+
+fd_fe_values <- alpha_fd_fe$asb_fdfe
+
+fd_fe_values <- as.data.frame(fd_fe_values)
+
+# This function returns a dataframe of indices values for each assemblage and a detailed list containing a matrix gathering the number of species per FE in each assemblage:
+
+alpha_fd_fe$"asb_fdfe" # dataframe with indices values for each assemblage
+
+alpha_fd_fe$"details_fdfe" # a matrix gathering the number of species per FE in each assemblage
+
+# Plot functional indices based on FEs for DW-WP, March, June, September
+
+mFD::alpha.fd.fe.plot(
+  alpha_fd_fe       = alpha_fd_fe,
+  plot_asb_nm       = c("DW-Sep"),
+  plot_ind_nm       = c("fred", "fored", "fvuln"), 
+  name_file         = NULL,
+  color_fill_fored  = "darkolivegreen2",
+  color_line_fred   = "darkolivegreen4",
+  color_fill_bar    = "grey80", 
+  color_fill_fvuln  = "lightcoral",
+  color_arrow_fvuln = "transparent", # "indianred4"
+  size_line_fred    = 0,
+  size_arrow_fvuln  = 0,
+  check_input       = TRUE)
+
+###
+
+# 3.Computing distances between species based on functional traits 
+
+# sp_tr = if there are a lot of species with identical traits, compute sp_dist between FEs (fe_tr), not single species (Beetles_traits)
+
+sp_dist <- mFD::funct.dist( 
+  sp_tr         = Beetles_traits,
+  tr_cat        = traits_metadata, 
+  metric        = "gower", # if all traits are continuous use "euclidean" 
+  scale_euclid  = "scale_center", # center transformation
+  ordinal_var   = "classic", # “classic” preserves the quantitative meaning of the classes
+  weight_type   = "equal", # same weight to all traits
+  stop_if_NA    = TRUE) 
+
+
+round(sp_dist, 3) # Output of the function mFD::funct.dist() 
+
+# Get full symmetric matrix from dist object 
+
+full_matrix <- as.matrix(sp_dist) 
+
+View(full_matrix)  # Opens it in a spreadsheet-like viewer 
+
+# 4.Computing functional spaces & their quality 
+
+fspaces_quality <- mFD::quality.fspaces( 
+  sp_dist             = sp_dist,  
+  maxdim_pcoa         = 10, # number of possible PCoA axes = number of species – 1. Typically 5–10 axes already contain >90% of the trait information unless your traits are extremely high dimensional.
+  deviation_weighting = "absolute", 
+  fdist_scaling       = FALSE, 
+  fdendro             = "average") 
+
+# inspect the PCoA eigenvalues to decide value for maxdim_pcoa
+
+sp_pcoa <- ape::pcoa(sp_dist, correction = "cailliez")
+
+sp_pcoa$values$Rel_corr_eig # Keep axes until cumulative explained variance ≥ 80–90%
+# OR keep axes until the drop in eigenvalues becomes sharp (“elbow method”)
+
+round(fspaces_quality$"quality_fspaces", 3)            # Quality metrics of spaces 
+
+# Illustrating the quality of the selected functional spaces 
+
+mFD::quality.fspaces.plot( 
+  
+  fspaces_quality            = fspaces_quality, 
+  quality_metric             = "mad", 
+  fspaces_plot               = c("tree_average", "pcoa_2d", "pcoa_3d", 
+                                 "pcoa_4d", "pcoa_5d", "pcoa_6d"), 
+  name_file                  = NULL, 
+  range_dist                 = NULL, 
+  range_dev                  = NULL, 
+  range_qdev                 = NULL, 
+  gradient_deviation         = c(neg = "darkblue", nul = "grey80", pos = "darkred"), 
+  gradient_deviation_quality = c(low = "yellow", high = "red"), 
+  x_lab                      = "Trait-based distance") 
+
+library (dplyr)
+# dendrogram
+fspaces_quality$"details_fspaces"$"dendro" %>%
+  as.dendrogram() %>%
+  dendextend::plot_horiz.dendrogram(side = TRUE)
+
+# How to find: "In the 4D space most species pairs are accurately represented (absolute deviation <0.1)"
+fspaces_quality$details_deviation
+
+# Filter deviations for 4D PCoA
+dev_4d <- fspaces_quality$details_deviation$abs_dev[, "pcoa_4d"]
+
+# Proportion of species pairs with abs deviation < 0.1
+prop_under_0.1 <- mean(dev_4d < 0.1)
+prop_under_0.1
+
+# 5.Test correlation between functional axes and traits 
+
+sp_faxes_coord <- fspaces_quality$"details_fspaces"$"sp_pc_coord" 
+
+tr_faxes <- mFD::traits.faxes.cor( 
+  sp_tr          = Beetles_traits,
+  sp_faxes_coord = sp_faxes_coord[ , c("PC1", "PC2", "PC3", "PC4")], 
+  plot           = TRUE) 
+
+# Print traits with significant effect: 
+
+tr_faxes$"tr_faxes_stat"[which(tr_faxes$"tr_faxes_stat"$"p.value" < 0.05), ] 
+
+# Return plots: 
+
+tr_faxes$"tr_faxes_plot" 
+
+# 6.Plot functional space 
+
+sp_faxes_coord <- fspaces_quality$"details_fspaces"$"sp_pc_coord" 
+
+big_plot <- mFD::funct.space.plot( 
+  sp_faxes_coord  = sp_faxes_coord[ , c("PC1", "PC2", "PC3", "PC4")], # after checking quality of functional space, 4 dimensions (4D) is correct to use
+  faxes           = c("PC1", "PC2", "PC3", "PC4"), 
+  name_file       = NULL, 
+  faxes_nm        = NULL, 
+  range_faxes     = c(NA, NA), 
+  color_bg        = "grey95", 
+  color_pool      = "darkgreen", 
+  fill_pool       = "white", 
+  shape_pool      = 21, 
+  size_pool       = 1, 
+  plot_ch         = TRUE, 
+  color_ch        = "black", 
+  fill_ch         = "white", 
+  alpha_ch        = 0.5, 
+  plot_vertices   = TRUE, 
+  color_vert      = "blueviolet", 
+  fill_vert       = "blueviolet", 
+  shape_vert      = 23, 
+  size_vert       = 1, 
+  plot_sp_nm      = NULL, 
+  nm_size         = 3, 
+  nm_color        = "black", 
+  nm_fontface     = "plain", 
+  check_input     = TRUE) 
+
+
+big_plot <- mFD::funct.space.plot( 
+  sp_faxes_coord  = sp_faxes_coord, 
+  faxes           = NULL, 
+  name_file       = NULL, 
+  faxes_nm        = NULL, 
+  range_faxes     = c(NA, NA), 
+  color_bg        = "grey95", 
+  color_pool      = "darkgreen", 
+  fill_pool       = "white", 
+  shape_pool      = 21, 
+  size_pool       = 1, 
+  plot_ch         = TRUE, 
+  color_ch        = "black", 
+  fill_ch         = "white", 
+  alpha_ch        = 0.5, 
+  plot_vertices   = TRUE, 
+  color_vert      = "blueviolet", 
+  fill_vert       = "blueviolet", 
+  shape_vert      = 23, 
+  size_vert       = 1, 
+  plot_sp_nm      = NULL, 
+  nm_size         = 3, 
+  nm_color        = "black", 
+  nm_fontface     = "plain", 
+  check_input     = TRUE) 
+
+# Plot the graph with all pairs of axes: 
+
+big_plot$patchwork 
+
+# Compute functional diversity indices & plot them 
+
+# mFD::alpha.fd.multidim() function requires row names for the asb_sp_w matrix (your y) 
+
+# Use y1 here 
+
+# the mFD package requires row names for your 'asb_sp_w' matrix here. 
+
+# rownames(y) <- paste0("Site_", 1:nrow(y)) 
+
+# for landscape and season
+site_names <- c("WP-Mar","WP-Jun", "WP-Sep", "DW-Mar", "DW-Jun", "DW-Sep") 
+# Assign these as row names to your matrix 
+
+# for landscape style
+site_names <- c("WP", "DW") 
+# Assign these as row names to your matrix 
+
+rownames(y) <- site_names 
+
+# Optional: filter rows with more than 3 non-zero values 
+
+# y_filtered <- y[rowSums(y > 0) > 3, ] Number of species should strictly be higher than the number of axes to compute the convex hull 
+
+alpha_fd_indices <- mFD::alpha.fd.multidim( 
+  sp_faxes_coord   = sp_faxes_coord[ , c("PC1", "PC2", "PC3", "PC4")], 
+  asb_sp_w         = y, 
+  ind_vect         = c("fdis", "fide", "fnnd", "feve", "fric", 
+                       "fdiv", "fori", "fspe"), 
+  scaling          = TRUE, 
+  check_input      = TRUE, 
+  details_returned = TRUE) 
+
+#setdiff(colnames(y), rownames(sp_faxes_coord))
+#setdiff(rownames(sp_faxes_coord), colnames(y))
+
+fd_ind_values <- alpha_fd_indices$"functional_diversity_indices" 
+
+fd_ind_values 
+
+details_list <- alpha_fd_indices$"details" 
+
+
+# substitute with Mar - Jun - Sep 
+
+plots_alpha <- mFD::alpha.multidim.plot( 
+  
+  output_alpha_fd_multidim = alpha_fd_indices, 
+  
+  plot_asb_nm              = c("WP-Mar", "DW-Mar"), 
+  ind_nm                   = c("fdis", "fide", "fnnd", "feve", "fric", 
+                               "fdiv", "fori", "fspe"), 
+  faxes                    = NULL, 
+  faxes_nm                 = NULL, 
+  range_faxes              = c(NA, NA), 
+  color_bg                 = "grey95", 
+  shape_sp                 = c(pool = 3, asb1 = 21, asb2 = 21), 
+  size_sp                  = c(pool = 0.7, asb1 = 1, asb2 = 1), 
+  color_sp                 = c(pool = "grey50", asb1 = "#1F968BFF", asb2 = "#DCE319FF"), 
+  color_vert               = c(pool = "grey50", asb1 = "#1F968BFF", asb2 = "#DCE319FF"), 
+  fill_sp                  = c(pool = NA, asb1 = "#1F968BFF", asb2 = "#DCE319FF"), 
+  fill_vert                = c(pool = NA, asb1 = "#1F968BFF", asb2 = "#DCE319FF"), 
+  color_ch                 = c(pool = NA, asb1 = "#1F968BFF", asb2 = "#DCE319FF"), 
+  fill_ch                  = c(pool = "white", asb1 = "#1F968BFF", asb2 = "#DCE319FF"), 
+  alpha_ch                 = c(pool = 1, asb1 = 0.3, asb2 = 0.3), 
+  shape_centroid_fdis      = c(asb1 = 22,  asb2 = 24), 
+  shape_centroid_fdiv      = c(asb1 = 22,  asb2 = 24), 
+  shape_centroid_fspe      = 23,
+  color_centroid_fspe      = "black", 
+  size_sp_nm               = 3, 
+  color_sp_nm              = "black", 
+  fontface_sp_nm           = "plain", 
+  save_file                = FALSE, 
+  check_input              = TRUE) 
+
+plots_alpha$"fric"$"patchwork" 
+
+plots_alpha$"fdiv"$"patchwork" 
+
+plots_alpha$"feve"$"patchwork" 
+
+plots_alpha$"fspe"$"patchwork" 
+
+plots_alpha$"fdis"$"patchwork" 
+
+# Functional beta diversity indices based on multidimensional space
+
+beta_fd_indices <- mFD::beta.fd.multidim(
+  sp_faxes_coord   = sp_faxes_coord[ , c("PC1", "PC2", "PC3", "PC4")],
+  asb_sp_occ       = asb_sp_occ,
+  check_input      = TRUE,
+  beta_family      = c("Sorensen"),
+  details_returned = TRUE)
+
+beta_fd_indices
+
+beta_plot <- mFD::beta.multidim.plot(
+  output_beta_fd_multidim = beta_fd_indices,
+  plot_asb_nm             = c("WP-Sep", "DW-Sep"),
+  beta_family             = c("Sorensen"), # Sorensen gives more weight to shared functional entitie (or use Jaccard)
+  plot_sp_nm              = NULL,
+  faxes                   = paste0("PC", 1:2), # 1:4 if I want PC1-PC4
+  name_file               = NULL,
+  faxes_nm                = NULL,
+  range_faxes             = c(NA, NA),
+  color_bg                = "grey95",
+  shape_sp                = c("pool" = 3.0, asb1 = 22, asb2 = 21),
+  size_sp                 = c("pool" = 0.8, asb1 =  1, asb2 =  1),
+  color_sp                = c("pool" = "grey50", asb1 = "blue", asb2 = "red"),
+  fill_sp                 = c("pool" = NA, asb1 = "white", asb2 = "white"),
+  fill_vert               = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  color_ch                = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  fill_ch                 = c("pool" = "white", asb1 = "blue", asb2 = "red"),
+  alpha_ch                = c("pool" = 1, asb1 = 0.3, asb2 = 0.3),
+  nm_size                 = 3,
+  nm_color                = "black",
+  nm_fontface             = "plain",
+  check_input             = TRUE)
+
+beta_plot
+
+### Combine months
+
+# Load required libraries
+library(mFD)
+library(ggplot2)
+library(gridExtra)
+
+# Generate the plot for March
+beta_wp_mar <- mFD::beta.multidim.plot(
+  output_beta_fd_multidim = beta_fd_indices,
+  plot_asb_nm             = c("WP-Mar", "DW-Mar"),
+  beta_family             = c("Sorensen"),
+  plot_sp_nm              = NULL,
+  faxes                   = paste0("PC", 1:2),
+  color_bg                = "grey95",
+  shape_sp                = c("pool" = 3.0, asb1 = 22, asb2 = 21),
+  size_sp                 = c("pool" = 0.8, asb1 = 1, asb2 = 1),
+  color_sp                = c("pool" = "grey50", asb1 = "blue", asb2 = "red"),
+  fill_sp                 = c("pool" = NA, asb1 = "white", asb2 = "white"),
+  fill_vert               = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  color_ch                = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  fill_ch                 = c("pool" = "white", asb1 = "blue", asb2 = "red"),
+  alpha_ch                = c("pool" = 1, asb1 = 0.3, asb2 = 0.3),
+  nm_size                 = 3,
+  nm_color                = "black",
+  nm_fontface             = "plain",
+  check_input             = TRUE
+)
+
+# Extract the ggplot object from the list
+beta_wp_mar_plot <- beta_wp_mar[[1]] + ggtitle("March") + theme(plot.title = element_text(hjust = 0.5))
+
+# Generate the plot for June
+beta_wp_jun <- mFD::beta.multidim.plot(
+  output_beta_fd_multidim = beta_fd_indices,
+  plot_asb_nm             = c("WP-Jun", "DW-Jun"),
+  beta_family             = c("Sorensen"),
+  plot_sp_nm              = NULL,
+  faxes                   = paste0("PC", 1:2),
+  color_bg                = "grey95",
+  shape_sp                = c("pool" = 3.0, asb1 = 22, asb2 = 21),
+  size_sp                 = c("pool" = 0.8, asb1 = 1, asb2 = 1),
+  color_sp                = c("pool" = "grey50", asb1 = "blue", asb2 = "red"),
+  fill_sp                 = c("pool" = NA, asb1 = "white", asb2 = "white"),
+  fill_vert               = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  color_ch                = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  fill_ch                 = c("pool" = "white", asb1 = "blue", asb2 = "red"),
+  alpha_ch                = c("pool" = 1, asb1 = 0.3, asb2 = 0.3),
+  nm_size                 = 3,
+  nm_color                = "black",
+  nm_fontface             = "plain",
+  check_input             = TRUE
+)
+
+# Extract the ggplot object from the list
+beta_wp_jun_plot <- beta_wp_jun[[1]] + ggtitle("June") + theme(plot.title = element_text(hjust = 0.5))
+
+# Generate the plot for September
+beta_wp_sep <- mFD::beta.multidim.plot(
+  output_beta_fd_multidim = beta_fd_indices,
+  plot_asb_nm             = c("WP-Sep", "DW-Sep"),
+  beta_family             = c("Sorensen"),
+  plot_sp_nm              = NULL,
+  faxes                   = paste0("PC", 1:2),
+  color_bg                = "grey95",
+  shape_sp                = c("pool" = 3.0, asb1 = 22, asb2 = 21),
+  size_sp                 = c("pool" = 0.8, asb1 = 1, asb2 = 1),
+  color_sp                = c("pool" = "grey50", asb1 = "blue", asb2 = "red"),
+  fill_sp                 = c("pool" = NA, asb1 = "white", asb2 = "white"),
+  fill_vert               = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  color_ch                = c("pool" = NA, asb1 = "blue", asb2 = "red"),
+  fill_ch                 = c("pool" = "white", asb1 = "blue", asb2 = "red"),
+  alpha_ch                = c("pool" = 1, asb1 = 0.3, asb2 = 0.3),
+  nm_size                 = 3,
+  nm_color                = "black",
+  nm_fontface             = "plain",
+  check_input             = TRUE
+)
+
+# Extract the ggplot object from the list
+beta_wp_sep_plot <- beta_wp_sep[[1]] + ggtitle("September") + theme(plot.title = element_text(hjust = 0.5))
+
+
+# Combine the three plots
+grid.arrange(
+  beta_wp_mar_plot, beta_wp_jun_plot, beta_wp_sep_plot,
+  ncol = 3,                      # Arrange in 3 columns
+  top = "Beta Diversity by Month"  # Title for the entire grid
+)
+
+
+# Functional traits among total
+
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(patchwork)
+
+# Function to make pie chart for any trait
+
+make_pie <- function(df, trait_col, title, palette="Set2") {
+  df_sum <- df %>%
+    group_by(.data[[trait_col]]) %>%
+    summarise(n_taxa = n_distinct(Species)) %>%
+    ungroup() %>%
+    mutate(Proportion = n_taxa / sum(n_taxa),
+           label = paste0(round(Proportion*100,1), "%")) %>%
+    arrange(desc(.data[[trait_col]])) %>%
+    mutate(ymax = cumsum(Proportion),
+           ymin = ymax - Proportion,
+           label_pos = (ymax + ymin)/2)
+  
+  ggplot(df_sum, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = .data[[trait_col]])) +
+    geom_rect() +
+    coord_polar(theta = "y") +
+    geom_text(aes(y = label_pos, x = 3.5, label = label), color = "white", size = 4) +
+    labs(title = title, fill = trait_col) +
+    scale_fill_brewer(palette = palette) +
+    theme_void() +
+    theme(legend.position = "right",
+          plot.title = element_text(face = "bold", hjust = 0.5))
+}
+
+# Create pies
+pie_diet <- make_pie(Beetles_traits, "Diet", "Diet")
+pie_substrate <- make_pie(Beetles_traits, "Substrate", "Substrate")
+pie_wings <- make_pie(Beetles_traits, "Wings", "Wings")
+pie_size <- make_pie(Beetles_traits, "Size", "Body Size")
+
+# Combine pies in one figure
+combined <- (pie_diet | pie_substrate) / (pie_wings | pie_size)
+
+# Display
+combined
+
+
+# Pie charts functional traits among landscapes (Conventional-Native)
+
+library(dplyr)
+library(tidyr)
+
+# Pivot species columns safely using tidyselect helpers
+traits_long <- Beetles_all %>%
+  pivot_longer(
+    cols = !c(Month, Site, Trap_ID, Lot_ID, Count, SR, Native, Non_native, Tot_nns, SR_nns, Tot_ns, SR_ns, Landscape_style, Replicate_ID, Front_Back, Bed_Lawn, Veg_type),
+    names_to = "Species",
+    values_to = "Abundance"
+  ) %>%
+  filter(Abundance > 0)
+
+# Merge with traits 
+
+traits_landscape <- traits_long %>%
+  left_join(Beetles_traits, by = "Species")
+
+make_pie_landscape <- function(df, trait_col, title, palette="Set2") {
+  
+  # Summarize by trait and landscape
+  df_sum <- df %>%
+    group_by(Landscape_style, .data[[trait_col]]) %>%
+    summarise(n_taxa = n_distinct(Species), .groups = "drop") %>% # to get percentages on taxa (species)
+    group_by(Landscape_style) %>%
+    mutate(Proportion = n_taxa / sum(n_taxa),
+           label = paste0(round(Proportion*100,1), "%")) %>%
+    arrange(Landscape_style, desc(.data[[trait_col]])) %>%
+    mutate(ymax = cumsum(Proportion),
+           ymin = ymax - Proportion,
+           label_pos = (ymax + ymin)/2)
+  
+  # Plot
+  ggplot(df_sum, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = .data[[trait_col]])) +
+    geom_rect() +
+    coord_polar(theta = "y") +
+    geom_text(aes(y = label_pos, x = 3.5, label = label), color = "white", size = 4) +
+    facet_wrap(~Landscape_style) +
+    labs(title = title, fill = trait_col) +
+    scale_fill_brewer(palette = palette) +
+    theme_void() +
+    theme(legend.position = "right",
+          plot.title = element_text(face = "bold", hjust = 0.5))
+}
+
+# Create pies for your traits
+pie_diet <- make_pie_landscape(traits_landscape, "Diet", "Diet")
+pie_substrate <- make_pie_landscape(traits_landscape, "Substrate", "Substrate")
+pie_wings <- make_pie_landscape(traits_landscape, "Wings", "Wing Morphology")
+pie_size <- make_pie_landscape(traits_landscape, "Size", "Body Size")
+
+library(patchwork)
+
+combined_pies <- (pie_diet | pie_substrate) / (pie_wings | pie_size)
+combined_pies
+
+
+# Table 2: Functional traits, landscape styles and beetle origin
+
+library(dplyr)
+
+# Function to summarize traits by landscape
+trait_summary_landscape <- function(df, trait_col) {
+  
+  df %>%
+    group_by(
+      Landscape_style,
+      Trait = .data[[trait_col]],
+      Origin
+    ) %>%
+    summarise(
+      Taxa = n_distinct(Species),
+      .groups = "drop"
+    ) %>%
+    
+    # % within landscape (sums to 100 per landscape)
+    group_by(Landscape_style) %>%
+    mutate(
+      `% within landscape` = round(Taxa / sum(Taxa) * 100, 1)
+    ) %>%
+    ungroup() %>%
+    
+    mutate(Trait_type = trait_col) %>%
+    arrange(Trait_type, Landscape_style, Trait, Origin) %>%
+    select(
+      Landscape_style,
+      Trait_type,
+      Trait,
+      Origin,
+      Taxa,
+      `% within landscape`
+    )
+}
+
+final_table <- bind_rows(
+  trait_summary_landscape(traits_landscape, "Diet"),
+  trait_summary_landscape(traits_landscape, "Substrate"),
+  trait_summary_landscape(traits_landscape, "Wings"),
+  trait_summary_landscape(traits_landscape, "Size")
+)
+
+
+# Graphs
+
+################################################################################
+# ESTIMATED ACTIVITY DENSITY
+################################################################################
+
+# Estimated Marginal Means (response scale)
+
+library (emmeans)
+
+emm_land_count <- emmeans(model_count4, ~ Landscape_style | Month, type = "response") 
+
+emm_veg_count  <- emmeans(model_count7,  ~ Veg_type | Month, type = "response")  
+
+emm_struct_count <- emmeans(growth_C1b, ~ Lawn | Month, type = "response") 
+
+
+# Pairwise comparisons (Tukey adjusted) 
+
+pairs(emm_land_count) 
+
+pairs(emm_veg_count) 
+
+pairs(emm_struct_count) 
+
+# Confidence intervals 
+
+confint(emm_land_count) 
+
+confint(emm_veg_count) 
+
+confint(emm_struct_count) 
+
+
+# Load necessary packages
+library(emmeans)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(patchwork)
+
+# Convert EMMs to data frames
+
+emm_land_df <- as.data.frame(emm_land_count)
+emm_veg_df  <- as.data.frame(emm_veg_count)
+emm_struct_df <- as.data.frame(emm_struct_count)
+
+# Rename factor levels
+
+emm_veg_df$Veg_type <- recode(emm_veg_df$Veg_type,
+                              "FlowerBed" = "Flower Bed")
+
+################################################################################
+# FIGURE 4A - Landscape style
+################################################################################
+
+p1 <- ggplot(emm_land_df, aes(x = Month, y = response, fill = Landscape_style)) + 
+  geom_col(position = position_dodge(0.8), width = 0.7) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), 
+                position = position_dodge(0.8), width = 0.2, linewidth = 0.4) + 
+  scale_fill_manual(values = c(
+    "Native" = "#4169E1",     
+    "Conventional" = "#D55E00"  
+  ))+
+  labs(title = "", 
+       y = "Estimated Activity Density", x = "Month", fill = "Landscape Style") + 
+  theme_classic() + 
+  theme( 
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12), 
+    axis.text.x = element_text(size = 11), 
+    axis.text.y = element_text(size = 12), 
+    strip.text = element_text(size = 12) 
+  ) 
+
+
+################################################################################
+# FIGURE 4B - Vegetation type
+################################################################################
+
+p2 <- ggplot(emm_veg_df, aes(x = Month, y = response, fill = Veg_type)) + 
+  geom_col(position = position_dodge(0.8), width = 0.7) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), 
+                position = position_dodge(0.8), width = 0.2, linewidth = 0.4) + 
+  scale_fill_manual(values = c(
+    "Native" = "#4169E1",   
+    "Flower Bed" = "#A63603",
+    "Turf" = "#FF7F0E"
+  ))+ 
+  labs(title = "", 
+       y = "Estimated Activity Density", x = "Month", fill = "Vegetation Type") + 
+  theme_classic() + 
+  theme( 
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12), 
+    axis.text.x = element_text(size = 11), 
+    axis.text.y = element_text(size = 12), 
+    strip.text = element_text(size = 12) 
+  )
+
+################################################################################
+# FIGURE 4C - Lawn
+################################################################################
+
+# Filter out the irrelevant Lawn category
+emm_struct_df_filtered <- emm_struct_df %>%
+  filter(Lawn != 3) %>%
+  mutate(Lawn_pct = factor(case_when(
+    Lawn == 0 ~ "0%",
+    Lawn == 4 ~ "26-50%",
+    Lawn == 5 ~ "51-75%"
+  ), levels = c("0%", "26-50%", "51-75%")))
+
+p3 <- ggplot(emm_struct_df_filtered, aes(x = Month, y = response, fill = Lawn_pct)) + 
+  geom_col(position = position_dodge(0.8), width = 0.7) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), 
+                position = position_dodge(0.8), width = 0.2, linewidth = 0.4) + 
+  scale_fill_manual(values = c(
+    "0%" = "#FFD9B3",       
+    "26-50%" = "#FFB266",   
+    "51-75%" = "#A35400"
+  )) +  
+  labs(title = "", 
+       y = "Estimated Activity Density", x = "Month", fill = "Lawn Cover") + 
+  theme_classic() + 
+  theme( 
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12), 
+    axis.text.x = element_text(size = 11), 
+    axis.text.y = element_text(size = 12), 
+    strip.text = element_text(size = 12) 
+  )
+
+
+
+combined_plot <- p1 | p2 | p3
+
+combined_plot
+p1
+p2
+p3
+
+# Optional: save as PDF or PNG
+#ggsave("EMM_Beetle_Plots.pdf", combined_plot, width = 15, height = 5)
+
+################################################################################
+# ESTIMATED TAXONOMIC RICHNESS
+################################################################################
+
+# Estimated Marginal Means (response scale)
+
+library (emmeans)
+
+# emm_land_sr = null
+
+emm_land_sr <- emmeans(model_SR4, ~ Landscape_style | Month, type = "response") 
+
+emm_veg_sr <- emmeans(model_SR7,  ~ Veg_type | Month, type = "response")  
+
+emm_struct_sr <- emmeans(growth_SR1b, ~ Lawn | Month, type = "response") 
+
+
+# Pairwise comparisons (Tukey adjusted) 
+
+pairs(emm_land_sr) 
+
+pairs(emm_veg_sr) 
+
+pairs(emm_struct_sr) 
+
+# Confidence intervals 
+
+confint(emm_land_sr) 
+
+confint(emm_veg_sr) 
+
+confint(emm_struct_sr) 
+
+
+# Load necessary packages
+library(emmeans)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(patchwork)
+
+# Convert EMMs to data frames
+
+emm_land_df <- as.data.frame(emm_land_sr)
+emm_veg_df  <- as.data.frame(emm_veg_sr)
+emm_struct_df <- as.data.frame(emm_struct_sr)
+
+# Rename factor levels
+
+emm_veg_df$Veg_type <- recode(emm_veg_df$Veg_type,
+                              "FlowerBed" = "Flower Bed")
+
+################################################################################
+# FIGURE 4D - Landscape style
+################################################################################
+
+p1_sr <- ggplot(emm_land_df, aes(x = Month, y = response, fill = Landscape_style)) + 
+  geom_col(position = position_dodge(0.8), width = 0.7) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), 
+                position = position_dodge(0.8), width = 0.2, linewidth = 0.4) + 
+  scale_fill_manual(values = c(
+    "Native" = "#4169E1",       
+    "Conventional" = "#D55E00"  
+  )) +
+  labs(title = "", 
+       y = "Estimated Species Richness", x = "Month", fill = "Landscape Style") + 
+  theme_classic() + 
+  theme( 
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12), 
+    axis.text.x = element_text(size = 11), 
+    axis.text.y = element_text(size = 12), 
+    strip.text = element_text(size = 12) 
+  )
+################################################################################
+# FIGURE 4E - Vegetation type
+################################################################################
+
+p2_sr <- ggplot(emm_veg_df, aes(x = Month, y = response, fill = Veg_type)) + 
+  geom_col(position = position_dodge(0.8), width = 0.7) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), 
+                position = position_dodge(0.8), width = 0.2, linewidth = 0.4) + 
+  scale_fill_manual(values = c(
+    "Native" = "#4169E1",   
+    "Flower Bed" = "#A63603",
+    "Turf" = "#FF7F0E"
+  )) +  
+  labs(title = "", 
+       y = "Estimated Species Richness", x = "Month", fill = "Vegetation Type") + 
+  theme_classic() + 
+  theme( 
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12), 
+    axis.text.x = element_text(size = 11), 
+    axis.text.y = element_text(size = 12), 
+    strip.text = element_text(size = 12) 
+  )
+
+################################################################################
+# FIGURE 4F - Lawn
+################################################################################
+
+# Filter out the irrelevant Lawn category
+emm_struct_df_filtered <- emm_struct_df %>%
+  filter(Lawn != 3) %>%
+  mutate(Lawn_pct = factor(case_when(
+    Lawn == 0 ~ "0%",
+    Lawn == 4 ~ "26-50%",
+    Lawn == 5 ~ "51-75%"
+  ), levels = c("0%", "26-50%", "51-75%")))
+
+p3_sr <- ggplot(emm_struct_df_filtered, aes(x = Month, y = response, fill = Lawn_pct)) + 
+  geom_col(position = position_dodge(0.8), width = 0.7) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), 
+                position = position_dodge(0.8), width = 0.2, linewidth = 0.4) + 
+  scale_fill_manual(values = c(
+    "0%" = "#FFD9B3",       
+    "26-50%" = "#FFB266",   
+    "51-75%" = "#A35400"    
+  )) +  
+  labs(title = "", 
+       y = "Estimated Species Richness", x = "Month", fill = "Lawn Cover") + 
+  theme_classic() + 
+  theme( 
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12), 
+    axis.text.x = element_text(size = 11), 
+    axis.text.y = element_text(size = 12), 
+    strip.text = element_text(size = 12) 
+  )
+
+
+combined_plot_sr <- p1_sr | p2_sr | p3_sr
+
+combined_plot_sr
+p1_sr
+p2_sr
+p3_sr
+
+# combine the two 
+library(patchwork)
+
+# Combine plots: top = combined_plot, bottom = combined_plot_sr
+combined_layout <- combined_plot / combined_plot_sr
+
+# Optionally, adjust relative heights
+combined_layout <- combined_plot / combined_plot_sr + 
+  plot_layout(heights = c(1, 1))  # equal heights
+
+# Display
+combined_layout
+
+library(cowplot)
+
+# Combine top and bottom plots
+top_row <- plot_grid(p1, p2, p3, ncol = 3)
+bottom_row <- plot_grid(p1_sr, p2_sr, p3_sr, ncol = 3)
+
+combined_layout <- plot_grid(
+  top_row,
+  bottom_row,
+  ncol = 1,
+  rel_heights = c(1, 1), 
+)
+
+# Add letters A-F with exact size and font
+combined_layout_labeled <- ggdraw(combined_layout) +
+  draw_plot_label(
+    label = c("A", "B", "C", "D", "E", "F"),
+    x = c(0, 1/3, 2/3, 0, 1/3, 2/3),  # relative x positions
+    y = c(1.02, 1.02, 1.02, 0.52, 0.52, 0.52),     # relative y positions
+    fontface = "plain",
+    fontfamily = "Arial",
+    size = 25  # size in points, exact
+  )                   
+
+
+# Display
+combined_layout_labeled
+
+################################################################################
+# Figure 5A: Combine native and non-native EMMs (both by Month)
+################################################################################
+
+library (emmeans)
+
+emm_native_df <- as.data.frame(emmeans(model_ns4, ~ Veg_type | Month, type = "response")) %>%
+  mutate(Status = "Native")
+
+emm_non_df <- as.data.frame(emmeans(model_nns4, ~ Veg_type | Month, type = "response")) %>%
+  mutate(Status = "Non-native")
+
+emm_all_df <- bind_rows(emm_native_df, emm_non_df)
+
+# Custom colors for bars
+custom_colors <- c("Native" = "#A7B7C7", "Non-native" = "#1F3552")
+
+# Rename factor levels
+emm_all_df$Veg_type <- recode(emm_all_df$Veg_type,
+                              "FlowerBed" = "Flower Bed")
+
+emm_all_df$Veg_type <- factor(
+  emm_all_df$Veg_type,
+  levels = c("Native", "Flower Bed", "Turf")
+)
+
+emm_all_df$Month <- factor(
+  emm_all_df$Month,
+  levels = c("March", "June", "September")
+)
+
+# Option 1 pl1
+
+# Plot: Bars colored by Status, faceted by Veg_type
+pl1<-ggplot(emm_all_df, aes(x = Veg_type, y = prob, fill = Status)) +
+  geom_col(position = position_dodge(0.8), width = 0.7) +
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL),
+                position = position_dodge(0.8), width = 0.2) +
+  facet_wrap(~ Month, scales = "free_x") +
+  scale_fill_manual(values = custom_colors) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "Vegetation type",
+    y = "Predicted Probability of Presence",
+    fill = "Species Status"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"), 
+    axis.text.x = element_text(angle = 0, hjust = 0.5, color = "black"),
+    axis.text.y = element_text(color = "black"),
+    axis.title = element_text(color = "black"),
+    legend.position = "top",
+    legend.title = element_text(size = 11, color = "black"),
+    legend.text = element_text(size = 11, color = "black"),
+    strip.background = element_rect(fill = "white"), 
+    strip.text = element_text(face = "plain", size = 12, color = "black")
+  )
+
+pl1
+
+
+
+# Option 2 for pl1
+
+emm_all_df <- emm_all_df %>%
+  mutate(
+    Status = factor(Status, levels = c("Native", "Non-native")),
+    Veg_type = factor(Veg_type, levels = c("Native", "Flower Bed", "Turf")),
+    x = paste(Status, Veg_type, sep = "_")
+  )
+emm_all_df$x <- factor(
+  emm_all_df$x,
+  levels = c(
+    "Native_Native",
+    "Native_Flower Bed",
+    "Native_Turf",
+    "Non-native_Native",
+    "Non-native_Flower Bed",
+    "Non-native_Turf"
+  )
+)
+
+pl1 <- ggplot(emm_all_df, aes(x = x, y = prob, fill = Status)) +
+  geom_col(width = 0.7) +
+  geom_errorbar(
+    aes(ymin = asymp.LCL, ymax = asymp.UCL),
+    width = 0.2,
+    linewidth = 0.4
+  ) +
+  facet_wrap(~ Month) +
+  scale_fill_manual(values = custom_colors) +
+  scale_y_continuous(limits = c(0, 1)) +
+  scale_x_discrete(
+    labels = c(
+      "Native_Native"     = "N",
+      "Native_Flower Bed"     = "FB",
+      "Native_Turf"           = "T",
+      "Non-native_Native" = "N",
+      "Non-native_Flower Bed" = "FB",
+      "Non-native_Turf"       = "T"
+    )
+  ) +
+  labs(
+    x = "Vegetation type",
+    y = "Predicted Probability of Presence",
+    fill = "Species Status"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 10, angle = 0, color = "black"),
+    axis.text.y = element_text(size = 9, color = "black"),
+    axis.title.x = element_text(size = 11, color = "black"),
+    axis.title.y = element_text(size = 11, color = "black"),
+    legend.position = "top",
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(face = "plain", size = 12, color = "black")
+  )
+
+pl1
+
+
+################################################################################
+# Figure 5B: Non-native beetles and lawn
+################################################################################
+
+library(ggplot2)
+library(cowplot)
+
+# Estimated Marginal Means (response scale)
+
+library (emmeans)
+
+emm_struct_count <- emmeans(growth_nns1b, ~ Lawn | Month, type = "response") 
+
+# Pairwise comparisons (Tukey adjusted) 
+
+pairs(emm_struct_count) 
+
+# Confidence intervals 
+
+confint(emm_struct_count)
+
+# Convert EMMs to data frames
+
+emm_struct_df <- as.data.frame(emm_struct_count)
+
+
+# Filter out the irrelevant Lawn category
+emm_struct_df_filtered <- emm_struct_df %>%
+  filter(Lawn != 3) %>%
+  mutate(Lawn_pct = factor(case_when(
+    Lawn == 0 ~ "0%",
+    Lawn == 4 ~ "26-50%",
+    Lawn == 5 ~ "51-75%"
+  ), levels = c("0%", "26-50%", "51-75%")))
+
+# Single color for bars
+bar_color <- "#1F3552"
+
+# Lawn_pct on x-axis, facet by Month 
+pl2 <- ggplot(emm_struct_df_filtered, aes(x = Lawn_pct, y = prob)) + 
+  geom_col(position = position_dodge(0.8), width = 0.5, fill = bar_color) + 
+  geom_errorbar(aes(ymin = asymp.LCL, ymax = asymp.UCL), 
+                position = position_dodge(0.8), width = 0.2,  linewidth = 0.4) +
+  facet_wrap(~ Month, scales = "free_x") +  # panels for months
+  labs(
+    x = "Lawn Cover",
+    y = "Predicted Probability of Presence"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white"), 
+    axis.text.x = element_text(size = 10, angle = 0, color = "black"),
+    axis.text.y = element_text(size = 9, color = "black"),
+    axis.title.x = element_text(size = 11, color = "black"),
+    axis.title.y = element_text(size = 11, color = "black"),
+    legend.position = "none",   # no legend
+    strip.background = element_rect(fill = "white"), 
+    strip.text = element_text(face = "plain", size = 12, color = "black")
+  )
+
+# Extract legend from pl1 only
+legend <- get_legend(
+  pl1 + theme(
+    legend.position = "top",
+    legend.title = element_text(size = 11),
+    legend.text = element_text(size = 11)
+  )
+)
+
+# Remove legends from individual plots
+pl1_no_legend <- pl1 + theme(legend.position = "none")
+pl2_no_legend <- pl2 # already has legend.position = "none"
+
+# Combine plots vertically with labels A and B
+combined_plots <- plot_grid(
+  pl1_no_legend,
+  pl2_no_legend,
+  ncol = 1,
+  align = "v",
+  axis = "lr",
+  labels = c("A", "B"),        # panel labels
+  label_size = 20,             # size of labels
+  label_fontface = "plain",    # not bold
+  label_y = 1.1,              # shift labels slightly above top
+  rel_heights = c(1, 1)
+)
+
+# Add the single legend on top
+final_plot <- plot_grid(
+  legend,
+  combined_plots,
+  ncol = 1,
+  rel_heights = c(0.1, 1)  # legend height vs plots
+)
+
+# Display final figure
+final_plot
