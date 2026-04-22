@@ -1,4 +1,4 @@
-# Pandolfi-et-al.-beetle-communities-in-residential-landscapes
+# Pandolfi et al.- Ground-dwelling beetle communities in newly established suburban yards: the role of residential landscape design
 
 ################################################################################
 # Non-metric Multidimensional Scaling (NMDS)
