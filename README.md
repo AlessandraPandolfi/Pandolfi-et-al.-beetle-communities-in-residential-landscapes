@@ -1,4 +1,4 @@
-# Early assembly of ground-dwelling beetle communities in newly established suburban yards: the role of residential design
+# Ground-dwelling beetle communities in newly established suburban yards: the role of residential design
 This repository contains code and data from a study examining ground‑dwelling beetle communities in recently built residential yards in Central Florida, USA. The project evaluates how beetles respond to contrasting landscape designs – native-plant–based yards versus conventionally landscaped yards dominated by turfgrass.
 
 # R Script and Data
