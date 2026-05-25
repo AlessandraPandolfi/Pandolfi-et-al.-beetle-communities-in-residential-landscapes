@@ -7,7 +7,9 @@ This repository contains code and data from a study examining ground‑dwelling 
 -	All required datasets, including metadata, are provided in Datasets.xlsx.
 
 # Supplementary Material
-All tables cited in the manuscript as supplementary material are included in the file Supplementary_Tables.
+- Supplementary_Information_S1_Beetles: Detailed trait descriptions for all beetle species, including definitions and reference sources.
+- Supplementary_Information_S2_Plants: Comprehensive plant species list with seasonal coverage for each species.
+- Supplementary_Tables: Supplementary tables (Table S1-S9) containing all statistical results, including model outputs, indicator species analyses, and trait summaries.
 
 # Citation
 If you use this material, please cite:
