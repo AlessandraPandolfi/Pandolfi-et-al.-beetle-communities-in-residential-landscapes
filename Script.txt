@@ -1,261 +1,4 @@
-# Pandolfi et al.- Ground-dwelling beetle communities in newly established suburban yards: the role of residential landscape design
-
-################################################################################
-# Non-metric Multidimensional Scaling (NMDS)
-################################################################################
-# Load packages 
-library(vegan)      
-library(tidyverse)  
-library(goeveg)    
-
-# LOT LEVEL AND LANDSCAPE STYLE
-
-species_matrix_site <- Data_nmds %>%
-  group_by(Lot_ID) %>%
-  summarise(across(Acanthinus_argentinus:Xantholininae_sp.C, mean)) %>%
-  ungroup() %>%
-  column_to_rownames("Lot_ID")
-
-set.seed(123)
-species_matrix_site<- decostand(species_matrix_site, method = "hellinger")
-nmds_site <- metaMDS(species_matrix_site, distance = "bray", k = 2, trymax = 200)
-
-print(nmds_site)
-stressplot(nmds_site)
-plot(nmds_site)
-
-metadata_site <- Data_nmds %>%
-  dplyr::select(Lot_ID, Landscape_style) %>%
-  distinct() %>%
-  filter(Lot_ID %in% rownames(species_matrix_site))
-
-nmds_SiteScores <- as.data.frame(scores(nmds_site)$sites) %>%
-  mutate(Lot_ID = rownames(.)) %>%
-  left_join(metadata_site, by = "Lot_ID")
-
-ggplot(nmds_SiteScores, aes(x = NMDS1, y = NMDS2)) +
-  geom_point(aes(color = Landscape_style), size = 4) +
-  geom_text(aes(label = Lot_ID), vjust = -1, size = 3) +
-  theme_classic() +
-  guides(color = guide_legend(override.aes = list(shape = 16)))
-
-# NMDS plot
-
-hulls <- nmds_SiteScores %>%
-  dplyr::group_by(Landscape_style) %>%
-  dplyr::slice(chull(NMDS1, NMDS2)) %>%
-  dplyr::ungroup()
-
-nmds_lot <- ggplot(nmds_SiteScores, aes(x = NMDS1, y = NMDS2)) +
-  
-  geom_polygon(
-    data = hulls,
-    aes(x = NMDS1, y = NMDS2, 
-        group = Landscape_style,
-        fill = Landscape_style,
-        color = Landscape_style),
-    alpha = 0.25, linewidth = 0.6,
-    inherit.aes = FALSE
-  ) +
-  
-  geom_point(aes(color = Landscape_style), size = 2) +
-  
-  geom_text(
-    data = nmds_SiteScores,
-    aes(x = NMDS1, y = NMDS2, label = Lot_ID),
-    color = "black",
-    vjust = -0.5,
-    size = 3
-  )+
-  
-  scale_colour_viridis_d(option = "D") +
-  scale_fill_viridis_d(option = "D") +
-  
-  labs(
-    x = "NMDS1", y = "NMDS2",
-    colour = "Landscape style",
-    fill = "Landscape style"
-  ) +
-  
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid = element_blank(),
-    panel.border = element_rect(color = "black", fill = NA, size = 0.7),
-    axis.line = element_line(color = "black"),
-    legend.position = "right",
-    legend.key.size = unit(0.4, "cm")
-  )
-
-# LOT-LEVEL PERMANOVA
-dist_site <- vegdist(species_matrix_site, method = "bray")
-
-adonis_site <- adonis2(
-  dist_site ~ Landscape_style,
-  data = metadata_site,
-  permutations = 999
-)
-
-adonis_site
-
-
-dist_mat_site <- vegdist(species_matrix_site, method = "bray")
-
-disp_site <- betadisper(dist_mat_site, metadata_site$Landscape_style)
-
-anova(disp_site)
-
-# Optional: inspect distances to group centroids
-disp_site
-
-# Optional: visualize
-boxplot(disp_site)
-
-TukeyHSD(disp_site)
-
-###
-
-# TRAP LEVEL AND LANDSCAPE STYLE
-
-# Load packages 
-library(vegan)      
-library(tidyverse)  
-library(goeveg)    
-
-species_matrix <- Data_nmds[, 18:ncol(Data_nmds)]
-
-# Species matrix
-
-species_matrix <- as.data.frame(lapply(species_matrix, as.numeric))
-
-species_matrix <- decostand(species_matrix, method = "hellinger")
-
-# Run NMDS 
-
-# Set seed for reproducibility
-set.seed(123)
-
-nmds <- metaMDS(species_matrix, distance = "bray", k = 2)
-
-print(nmds)
-
-stressplot(nmds)
-
-plot(nmds)
-
-# Get habitat type (Use Trap_ID since each row corresponds to one trap sample)
-
-# Create a Unique Sample ID
-Data_nmds <- Data_nmds %>%
-  mutate(Sample_ID = paste(Trap_ID, Month, sep = "_"))
-
-# Extract NMDS scores for sites 
-nmds_SiteScores <-
-  as.data.frame(scores(nmds)$sites) %>%
-  mutate(
-    Sample_ID = Data_nmds$Sample_ID,
-    Landscape_style = Data_nmds$Landscape_style,
-    Month = Data_nmds$Month
-  )
-
-head(nmds_SiteScores)
-
-# Extract NMDS scores for species  
-nmds_SpeciesScores <- 
-  as.data.frame(scores(nmds, "species"))
-
-# create a column of species, from the rownames of species.scores
-nmds_SpeciesScores$species <- rownames(nmds_SpeciesScores) 
-
-### NMDS plot
-
-# Compute convex hulls for each Landscape_style
-habitat.hull <- nmds_SiteScores %>%
-  group_by(Landscape_style) %>%
-  slice(chull(NMDS1, NMDS2)) %>%  # convex hull points
-  ungroup()
-
-# Compute centroids for each Landscape_style
-Landscape_Centroid <- nmds_SiteScores %>%
-  group_by(Landscape_style) %>%
-  summarise(
-    axis1 = mean(NMDS1),
-    axis2 = mean(NMDS2)
-  )
-
-library(ggplot2)
-library(ggrepel)
-library(viridis)
-
-nmds_trap <- ggplot() + 
-  geom_point(data = nmds_SiteScores, 
-             aes(x = NMDS1, y = NMDS2, colour = Landscape_style), size = 2) +
-  geom_polygon(data = habitat.hull, 
-               aes(x = NMDS1, y = NMDS2, 
-                   fill = Landscape_style, 
-                   group = Landscape_style,
-                   color = Landscape_style),
-               alpha = 0.25, linewidth = 0.6) +
-  geom_point(data = Landscape_Centroid, 
-             aes(x = axis1, y = axis2, color = Landscape_style),
-             size = 4, shape = 17, stroke = 1.2) +
-  geom_text_repel(data = nmds_SpeciesScores, 
-                  aes(x = NMDS1, y = NMDS2, label = species),
-                  size = 3, max.overlaps = 100) +
-  
-  labs(x = "NMDS1", y = "NMDS2", color = "Landscape style", fill = "Landscape style") +
-  scale_colour_viridis_d(option = "D") +
-  scale_fill_viridis_d(option = "D") +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid = element_blank(),   
-    panel.border = element_rect(color = "black", fill = NA, size = 0.7),
-    axis.line = element_line(color = "black"),
-    legend.position = "right",
-    legend.key.size = unit(0.4, "cm")
-  )
-
-# Test for significant differences
-
-library(vegan)
-
-# Extract species abundance matrix
-# Use species_matrix
-
-# Prepare metadata
-metadata <- Data_nmds[, c("Sample_ID", "Landscape_style", "Month", "Veg_type")]
-
-# Simple PERMANOVA testing Landscape_style
-set.seed(123)  # for reproducibility
-
-adonis_result <- adonis2(
-  species_matrix ~ Landscape_style,
-  data = metadata,
-  permutations = 999,
-  method = "bray"
-)
-
-adonis_result
-
-# PERMDISP
-
-# Bray-Curtis distance on Hellinger-transformed species data
-dist_matrix <- vegdist(species_matrix, method = "bray")
-
-disp_landscape <- betadisper(dist_matrix, metadata$Landscape_style)
-disp_landscape
-
-anova(disp_landscape)
-
-
-# panel for the two nmds
-
-library(patchwork)
-
-(nmds_trap + nmds_lot) +
-  plot_annotation(tag_levels = "A") &
-  theme(
-    plot.tag = element_text(size = 26, face = "plain", color = "black")
-  )
+# Pandolfi-et-al.2026-beetle-communities-in-residential-landscapes
 
 ################################################################################
 # Redundancy analysis (RDA)
@@ -424,7 +167,11 @@ month_hulls <- site_df %>%
   ungroup()
 
 # Define colors and shapes
-my_colors_month <- c("March" = "#009E73", "June" = "#E69F00", "September" = "#0072B2")
+my_colors_month <- c(
+  "March" = "#004C75",      # dark blue
+  "June" = "#E69F00",       # orange
+  "September" = "#DFA0B5"   # purple
+)
 shape_ls <- c("Native" = 1, "Conventional" = 16)
 
 # Plot using ggplot, with polygons by Month, points shaped by Landscape_style, colored by Month,
@@ -439,14 +186,29 @@ site_df$Month <- factor(
   levels = c("March", "June", "September")
 )
 
+site_df$Landscape_style <- factor(
+  site_df$Landscape_style,
+  levels = c("Conventional", "Native")
+)
+
 ggplot(site_df, aes(x = RDA1, y = RDA2)) +
   
   geom_polygon(
     data = month_hulls,
-    aes(x = RDA1, y = RDA2, group = Month, fill = Month, color = Month),
+    aes(
+      x = RDA1,
+      y = RDA2,
+      group = Month,
+      fill = Month,
+      color = Month
+    ),
     alpha = 0.1,
     linewidth = 0.3,   
     show.legend = FALSE
+  ) +
+  
+  scale_fill_manual(
+    values = my_colors_month
   ) +
   
   geom_point(aes(color = Month, shape = Landscape_style), size = 3) +
@@ -467,12 +229,12 @@ ggplot(site_df, aes(x = RDA1, y = RDA2)) +
   
   scale_color_manual(
     name = "Species Status",
-    values = c("Native" = "#0000CD", "Non-native" = "red2"),
+    values = c("Native" = "#000000", "Non-native" = "#26A6B2"),
     breaks = c("Native", "Non-native")
   ) +
   
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.7) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.3) +
   
   coord_equal() +
   
